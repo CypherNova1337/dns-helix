@@ -32,9 +32,9 @@ A lightning-fast DNS permutation scanner and resolver, built in Go for speed and
 To install `dns-helix`, you'll need Go installed on your machine. Then, run the following command:
 
 ```bash
-go install -v [github.com/YourUsername/dns-helix@latest](https://github.com/YourUsername/dns-helix@latest)
+go install -v [github.com/CypherNova1337/dns-helix@latest](https://github.com/CypherNova1337/dns-helix@latest)
 ```
-*(Note: Replace `YourUsername` with your actual GitHub username.)*
+
 
 ## Usage
 
