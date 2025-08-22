@@ -33,7 +33,7 @@ To install `dns-helix`, you'll need Go installed on your machine. Then, run the 
 
 ```bash
 go install -v github.com/CypherNova1337/dns-helix@latest
-
+```
 
 ## Usage
 
