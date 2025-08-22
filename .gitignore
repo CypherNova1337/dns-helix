@@ -1,0 +1,6 @@
+# Compiled binary
+dns-helix
+
+# Resume logs and test results
+*.log
+test_results.txt
