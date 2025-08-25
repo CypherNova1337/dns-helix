@@ -1,4 +1,4 @@
-module dns-helix
+module github.com/CypherNova1337/dns-helix
 
 go 1.24.2
 
