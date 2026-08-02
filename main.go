@@ -1,4 +1,3 @@
-// DNS-Helix - Definitive Final Version
 package main
 
 import (
@@ -32,7 +31,7 @@ const (
 	colorReset = "\033[0m"
 )
 
-// Corrected ASCII Art Banner
+// ASCII art banner
 var banner = colorCyan + `
 __/\\\\\\\\\\\\_____/\\\\\_____/\\\_____/\\\\\\\\\\\______________/\\\________/\\\__/\\\\\\\\\\\\\\\__/\\\______________/\\\\\\\\\\\__/\\\_______/\\\_        
  _\/\\\////////\\\__\/\\\\\\___\/\\\___/\\\/////////\\\___________\/\\\_______\/\\\_\/\\\///////////__\/\\\_____________\/////\\\///__\///\\\___/\\\/__       
@@ -244,14 +243,13 @@ func main() {
 	}
 	log.Printf("Loaded %d DNS resolvers.", len(resolvers))
 
-	// --- DEADLOCK FIXED: This block was re-written ---
 	if *preValidate && !isResuming {
 		log.Println("🔍 Pre-validation enabled. Checking base domains first...")
-		
+
 		validationJobs := make(chan string, initialCount)
 		validatedChan := make(chan string, initialCount)
 		var validationWg sync.WaitGroup
-		
+
 		// Start a collector goroutine to drain the validatedChan concurrently
 		var collectorWg sync.WaitGroup
 		var validatedSubdomains []string
@@ -295,7 +293,7 @@ func main() {
 		validationWg.Wait()
 		close(validatedChan)
 		collectorWg.Wait()
-		
+
 		baseSubdomains = validatedSubdomains
 		log.Printf("✅ Pre-validation complete. %d of %d base domains are valid.", len(baseSubdomains), initialCount)
 		if len(baseSubdomains) == 0 {
@@ -303,6 +301,9 @@ func main() {
 			return
 		}
 	}
+
+	shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
+	defer cancelShutdown()
 
 	workChan := make(chan string, *threads*4)
 	resolvedChan := make(chan string, *threads*4)
@@ -326,24 +327,40 @@ func main() {
 	for i := 0; i < *threads; i++ {
 		go func() {
 			defer resolverWg.Done()
-			for domain := range workChan {
-				attemptedCount.Add(1)
-				attemptedDomains.Store(domain, true)
-				<-rateLimiter.C
-				resolverAddr := resolvers[rand.Intn(len(resolvers))]
-				resolver := &net.Resolver{
-					PreferGo: true,
-					Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-						d := net.Dialer{Timeout: time.Second * 1}
-						return d.DialContext(ctx, "udp", resolverAddr)
-					},
+			for {
+				select {
+				case domain, ok := <-workChan:
+					if !ok {
+						return
+					}
+					attemptedCount.Add(1)
+					attemptedDomains.Store(domain, true)
+					select {
+					case <-rateLimiter.C:
+					case <-shutdownCtx.Done():
+						return
+					}
+					resolverAddr := resolvers[rand.Intn(len(resolvers))]
+					resolver := &net.Resolver{
+						PreferGo: true,
+						Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+							d := net.Dialer{Timeout: time.Second * 1}
+							return d.DialContext(ctx, "udp", resolverAddr)
+						},
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					_, err := resolver.LookupHost(ctx, domain)
+					cancel()
+					if err == nil {
+						select {
+						case resolvedChan <- domain:
+						case <-shutdownCtx.Done():
+							return
+						}
+					}
+				case <-shutdownCtx.Done():
+					return
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				_, err := resolver.LookupHost(ctx, domain)
-				if err == nil {
-					resolvedChan <- domain
-				}
-				cancel()
 			}
 		}()
 	}
@@ -353,13 +370,24 @@ func main() {
 		defer generatorWg.Done()
 		if isResuming {
 			for _, domain := range baseSubdomains {
-				workChan <- domain
-				generatedCount.Add(1)
+				select {
+				case workChan <- domain:
+					generatedCount.Add(1)
+				case <-shutdownCtx.Done():
+					return
+				}
 			}
 		} else {
 			for _, domain := range baseSubdomains {
-				workChan <- domain
-				generatedCount.Add(1)
+				select {
+				case workChan <- domain:
+					generatedCount.Add(1)
+				case <-shutdownCtx.Done():
+					return
+				}
+				if shutdownCtx.Err() != nil {
+					return
+				}
 				parts, rootDomain := partiateDomain(domain)
 				if rootDomain == "" {
 					continue
@@ -370,8 +398,11 @@ func main() {
 				go func() {
 					defer permWg.Done()
 					for p := range permChan {
-						workChan <- p
-						generatedCount.Add(1)
+						select {
+						case workChan <- p:
+							generatedCount.Add(1)
+						case <-shutdownCtx.Done():
+						}
 					}
 				}()
 				insertWordEveryIndex(parts, rootDomain, words, permChan)
@@ -409,6 +440,7 @@ func main() {
 		case <-sigs:
 			interrupted = true
 			running = false
+			cancelShutdown()
 			fmt.Println()
 			log.Println("⚠️  Ctrl+C detected. Shutting down...")
 		case <-ticker.C:
@@ -417,7 +449,7 @@ func main() {
 		}
 	}
 
-	time.Sleep(2500 * time.Millisecond)
+	resolverWg.Wait()
 
 	close(resolvedChan)
 	collectorWg.Wait()
