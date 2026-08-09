@@ -22,9 +22,11 @@ A lightning-fast DNS permutation scanner and resolver, built in Go for speed and
 - **High-Speed, Concurrent DNS Resolution:** Utilizes goroutines to resolve thousands of domains per second.
 - **Advanced Permutation Generation:** Creates new potential subdomains by inserting words, modifying numbers, and adding common prefixes (dev, staging, regions).
 - **Seed Validation (`--pre-validate`):** Optionally pre-scans the initial list of domains to ensure permutations are only generated for valid, resolvable seeds.
-- **Session Resumption (`--resume`):** Automatically saves the session on interruption (`Ctrl+C`) and allows you to resume exactly where you left off.
+- **Session Resumption (`--resume`):** On interruption (`Ctrl+C`) it saves every seed whose permutations were not yet processed, so a resumed run regenerates and completes the remaining work rather than losing it.
+- **Duplicate-Aware:** Overlapping permutations are looked up only once, so no DNS query is ever wasted on a name that has already been tried.
+- **Retries (`--retries`):** Each candidate is retried against a fresh random resolver before being declared dead, avoiding false negatives from a single slow or flaky upstream.
 - **`anew`-style Output:** Intelligently merges new results with existing ones in the output file, creating a unique, sorted list every time.
-- **Rate-Limiting (`-l`):** Configurable rate-limiting to prevent network blocking and ensure stability.
+- **Rate-Limiting (`-l`):** Configurable rate-limiting to prevent network blocking and ensure stability (`0` = unlimited).
 - **Piped Input:** Fully supports piped input from other command-line tools.
 
 ## Installation
@@ -63,7 +65,8 @@ dns-helix --resume path/to/resume-file.log -r path/to/resolvers.txt -o path/to/r
 | `-r` | Path to the DNS resolvers file. | `resolvers.txt` |
 | `-o` | Path to the output file. | `resolved_subdomains.txt`|
 | `-t` | Number of concurrent DNS resolving threads. | `100` |
-| `-l` | Max queries per second to send. | `1000` |
+| `-l` | Max queries per second to send (`0` = unlimited). | `1000` |
+| `--retries` | Resolution attempts per domain before giving up (min 1). | `2` |
 | `--pre-validate` | Pre-validate base domains before generating permutations. | `false`|
 | `--resume` | Path to a resume file to continue a previous scan. | |
 
