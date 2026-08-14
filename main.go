@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -20,6 +21,16 @@ import (
 	"time"
 
 	"golang.org/x/net/publicsuffix"
+)
+
+// Bundled defaults compiled into the binary so a scan works from any directory,
+// even when no words.txt / resolver list is present on disk. An on-disk file
+// (default filename in the CWD, or one passed via -w / -r) always wins.
+var (
+	//go:embed words.txt
+	embeddedWords string
+	//go:embed recommended_resolvers.txt
+	embeddedResolvers string
 )
 
 var (
@@ -51,21 +62,27 @@ __/\\\\\\\\\\\\_____/\\\\\_____/\\\_____/\\\\\\\\\\\______________/\\\________/\
         _\////////////_____\///_____\/////____\///////////_______________\///________\///__\///////////////__\///////////////__\///////////__\///_______\///__
 ` + colorReset
 
-func readLines(path string) ([]string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
+// parseLines trims whitespace and drops blank/comment (#) lines, the shared
+// filtering used for both on-disk files and the embedded defaults.
+func parseLines(text string) []string {
 	var lines []string
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(strings.NewReader(text))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" && !strings.HasPrefix(line, "#") {
 			lines = append(lines, line)
 		}
 	}
-	return lines, scanner.Err()
+	return lines
+}
+
+func readLines(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseLines(string(data)), nil
 }
 
 func partiateDomain(domain string) ([]string, string) {
@@ -234,8 +251,8 @@ func main() {
 	fmt.Printf("%78s\n\n", colorCyan+"by CypherNova"+colorReset)
 
 	subdomainsFile := flag.String("s", "", "Path to the subdomains file (optional, reads from stdin).")
-	wordlistFile := flag.String("w", "words.txt", "Path to the wordlist file.")
-	resolversFile := flag.String("r", "resolvers.txt", "Path to the DNS resolvers file.")
+	wordlistFile := flag.String("w", "words.txt", "Path to the wordlist file (falls back to the built-in list).")
+	resolversFile := flag.String("r", "recommended_resolvers.txt", "Path to the DNS resolvers file (falls back to the built-in list).")
 	outputFile := flag.String("o", "resolved_subdomains.txt", "Path to the output file.")
 	threads := flag.Int("t", 100, "Number of concurrent DNS resolving threads.")
 	rateLimit := flag.Int("l", 1000, "Max queries per second to send (0 = unlimited).")
@@ -243,6 +260,12 @@ func main() {
 	preValidate := flag.Bool("pre-validate", false, "Pre-validate that base domains are resolvable before generating permutations.")
 	resumeFile := flag.String("resume", "", "Path to a resume file to continue a previous scan.")
 	flag.Parse()
+
+	// Track which flags the user explicitly set so a missing default file can
+	// silently fall back to the embedded list, while an explicit -w/-r path that
+	// is missing is treated as a real error the user asked for.
+	flagSet := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
 
 	// --- Input validation: bad flags should be a clean error, never a panic. ---
 	if *threads < 1 {
@@ -298,18 +321,30 @@ func main() {
 	log.Printf("Loaded %d domains to process.", initialCount)
 
 	// The wordlist drives permutation generation, which runs for both fresh and
-	// resumed scans, so it is always loaded. A missing/empty wordlist is not
-	// fatal: the number and prefix mutations still generate useful candidates.
+	// resumed scans, so it is always loaded. If the on-disk file is missing we
+	// fall back to the built-in list (unless the user explicitly pointed -w at a
+	// path); a genuinely empty wordlist is non-fatal because the number and
+	// prefix mutations still generate useful candidates.
 	words, err := readLines(*wordlistFile)
 	if err != nil {
-		log.Printf("⚠️  Could not read wordlist file (%v); continuing with number/prefix mutations only.", err)
+		if !flagSet["w"] {
+			words = parseLines(embeddedWords)
+			log.Printf("Loaded %d words from built-in wordlist.", len(words))
+		} else {
+			log.Printf("⚠️  Could not read wordlist file (%v); continuing with number/prefix mutations only.", err)
+		}
 	} else {
 		log.Printf("Loaded %d words from wordlist.", len(words))
 	}
 
 	resolvers, err := readLines(*resolversFile)
 	if err != nil {
-		log.Fatalf("❌ Could not read resolvers file: %v", err)
+		if !flagSet["r"] {
+			resolvers = parseLines(embeddedResolvers)
+			log.Printf("Loaded %d DNS resolvers from built-in list.", len(resolvers))
+		} else {
+			log.Fatalf("❌ Could not read resolvers file: %v", err)
+		}
 	}
 	for i, r := range resolvers {
 		if !strings.Contains(r, ":") {
