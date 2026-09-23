@@ -23,7 +23,7 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-const version = "1.0.0"
+const version = "1.0.2"
 
 // Bundled defaults compiled into the binary so a scan works from any directory,
 // even when no words.txt / resolver list is present on disk. An on-disk file
