@@ -23,6 +23,8 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
+const version = "1.0.0"
+
 // Bundled defaults compiled into the binary so a scan works from any directory,
 // even when no words.txt / resolver list is present on disk. An on-disk file
 // (default filename in the CWD, or one passed via -w / -r) always wins.
@@ -247,9 +249,6 @@ func saveResumeFile(fileName string, remaining []string, workChan <-chan string)
 }
 
 func main() {
-	fmt.Println(banner)
-	fmt.Printf("%78s\n\n", colorCyan+"by CypherNova"+colorReset)
-
 	subdomainsFile := flag.String("s", "", "Path to the subdomains file (optional, reads from stdin).")
 	wordlistFile := flag.String("w", "words.txt", "Path to the wordlist file (falls back to the built-in list).")
 	resolversFile := flag.String("r", "recommended_resolvers.txt", "Path to the DNS resolvers file (falls back to the built-in list).")
@@ -259,7 +258,17 @@ func main() {
 	retries := flag.Int("retries", 2, "Resolution attempts per domain before giving up (min 1).")
 	preValidate := flag.Bool("pre-validate", false, "Pre-validate that base domains are resolvable before generating permutations.")
 	resumeFile := flag.String("resume", "", "Path to a resume file to continue a previous scan.")
+	versionFlag := flag.Bool("version", false, "Print version and exit.")
 	flag.Parse()
+
+	// Printed before the banner so `-version` is machine-readable on its own.
+	if *versionFlag {
+		fmt.Printf("dns-helix %s\n", version)
+		return
+	}
+
+	fmt.Println(banner)
+	fmt.Printf("%78s\n\n", colorCyan+"by CypherNova"+colorReset)
 
 	// Track which flags the user explicitly set so a missing default file can
 	// silently fall back to the embedded list, while an explicit -w/-r path that
